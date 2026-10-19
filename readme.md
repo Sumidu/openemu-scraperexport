@@ -49,6 +49,9 @@ python3 openemu_exporter.py --width 256
 
 # Export as JPEG with custom quality
 python3 openemu_exporter.py --width 256 --format jpg --quality 90
+
+# Export games imported in the last 24 hours
+python3 openemu-exporter.py --since 24h
 ```
 
 ## 📖 Usage Examples
@@ -83,6 +86,14 @@ python3 openemu_exporter.py --format jpg --quality 85
 python3 openemu_exporter.py --format jpg
 ```
 
+### Date Filter
+```bash
+# Export games imported in the last 24 hours
+python3 openemu-exporter.py --since 24h
+```
+
+`--since` accepts a positive duration in seconds (`s`), minutes (`m`), hours (`h`), or days (`d`), such as `30m`, `24h`, or `7d`. Filtering uses OpenEmu's **game import date** (`ZGAME.ZIMPORTDATE`), not an individual ROM's add date; ROMs linked to the same game share the game's date.
+
 ### Advanced Examples
 ```bash
 # Perfect for web galleries: 256px JPEG
@@ -107,6 +118,7 @@ python3 openemu_exporter.py --width 128 --format jpg --quality 80
 | `--quality 1-100` | JPEG quality percentage | `95` |
 | `--png-optimize` | Optimize PNG files for smaller size | `False` |
 | `--resample {lanczos,bicubic,bilinear,nearest}` | Resampling algorithm | `lanczos` |
+| `--since DURATION` | Export games imported within a relative window, e.g. `24h` | All dates |
 | `--help` | Show help message | - |
 
 ## 📁 Output Structure

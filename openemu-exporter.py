@@ -30,9 +30,13 @@ import os
 import shutil
 import urllib.parse
 import argparse
+import re
+import time
 from pathlib import Path
 import sys
 from typing import List, Tuple, Optional
+
+COCOA_EPOCH_OFFSET = 978307200
 
 try:
     from PIL import Image
@@ -54,6 +58,7 @@ Examples:
   python3 openemu_exporter.py --format jpg --quality 90 # Export as JPEG with 90% quality
   python3 openemu_exporter.py --format png --png-optimize # Export optimized PNG files
   python3 openemu_exporter.py --width 256 --format jpg  # Resize and convert to JPEG
+  python3 openemu_exporter.py --since 24h              # Games imported in the last 24 hours
         """
     )
     
@@ -71,6 +76,12 @@ Examples:
                        help='Output image format (default: png)')
     parser.add_argument('--png-optimize', action='store_true',
                        help='Optimize PNG files for smaller size (slower but smaller files)')
+    parser.add_argument(
+        '--since',
+        type=parse_since_duration,
+        metavar='DURATION',
+        help='Export games imported within this window (e.g. 24h, 7d, 30m, 60s)',
+    )
     
     args = parser.parse_args()
     
@@ -86,6 +97,18 @@ Examples:
         parser.error("When using --height with --keep-aspect-ratio, you must also specify --width")
     
     return args
+
+def parse_since_duration(value: str) -> int:
+    """Parse a positive duration such as 24h or 7d and return seconds."""
+    match = re.fullmatch(r'([1-9]\d*)([smhd])', value.strip().lower())
+    if not match:
+        raise argparse.ArgumentTypeError(
+            "expected a positive duration such as 30m, 24h, or 7d"
+        )
+
+    amount = int(match.group(1))
+    unit_seconds = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+    return amount * unit_seconds[match.group(2)]
 
 def resize_image(source_path: Path, dest_path: Path, width: Optional[int] = None, 
                 height: Optional[int] = None, keep_aspect_ratio: bool = True,
@@ -263,7 +286,10 @@ def diagnose_database(conn: sqlite3.Connection) -> None:
     except sqlite3.Error as e:
         print(f"   Error in diagnostic: {e}")
 
-def get_rom_cover_mappings(conn: sqlite3.Connection) -> List[Tuple[str, str, str, str]]:
+def get_rom_cover_mappings(
+    conn: sqlite3.Connection,
+    since_timestamp: Optional[float] = None,
+) -> List[Tuple[str, str, str, str]]:
     """
     Get mappings of ROM files to their cover art UUIDs and system names.
     Returns: List of (rom_filename, cover_uuid, game_title, system_name) tuples
@@ -284,12 +310,26 @@ def get_rom_cover_mappings(conn: sqlite3.Connection) -> List[Tuple[str, str, str
     WHERE i.ZRELATIVEPATH IS NOT NULL 
     AND i.ZRELATIVEPATH != ''
     AND r.ZLOCATION IS NOT NULL
+    """
+    parameters = ()
+    if since_timestamp is not None:
+        game_columns = {
+            row['name'] for row in conn.execute("PRAGMA table_info(ZGAME)")
+        }
+        if 'ZIMPORTDATE' not in game_columns:
+            raise RuntimeError(
+                "Date filtering requires ZGAME.ZIMPORTDATE, which is missing "
+                "from this OpenEmu database."
+            )
+        query += "AND g.ZIMPORTDATE >= ?\n"
+        parameters = (since_timestamp - COCOA_EPOCH_OFFSET,)
+    query += """
     ORDER BY s.ZSHORTNAME, g.ZGAMETITLE;
     """
     
     try:
         print(f"🔍 Using corrected query with ZLOCATION...")
-        cursor = conn.execute(query)
+        cursor = conn.execute(query, parameters)
         results = cursor.fetchall()
         
         if results:
@@ -586,7 +626,8 @@ def main():
     try:
         # Get ROM to cover art mappings
         print("🔍 Reading OpenEmu database...")
-        mappings = get_rom_cover_mappings(conn)
+        since_timestamp = time.time() - args.since if args.since is not None else None
+        mappings = get_rom_cover_mappings(conn, since_timestamp)
         
         if not mappings:
             print("❌ No ROM cover art mappings found in database.")
